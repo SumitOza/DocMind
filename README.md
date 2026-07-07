@@ -1,9 +1,8 @@
 ---
-<<<<<<< HEAD
-title: DocMind — Document AI Assistant
+title: DocMind
 emoji: 📄
-colorFrom: slate
-colorTo: blue
+colorFrom: blue
+colorTo: slate
 sdk: docker
 pinned: false
 license: mit
@@ -11,7 +10,7 @@ license: mit
 
 # DocMind — Document-Based AI Assistant
 
-A full-stack RAG (Retrieval-Augmented Generation) application. Upload a PDF or text file, ask questions, and get answers grounded in your document with page-level citations.
+A full-stack RAG app. Upload a PDF or text file, ask questions, get answers grounded in your document with page citations.
 
 Built for the **E2M Solutions AI Engineering Take-Home Assessment**.
 

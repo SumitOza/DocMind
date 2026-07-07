@@ -16,7 +16,7 @@ load_dotenv()
 class GeminiEmbeddingFunction:
     def __init__(self):
         import google.generativeai as genai
-        genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+        genai.configure(api_key=os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY"))
         self._genai = genai
 
     def __call__(self, input: List[str]) -> List[List[float]]:

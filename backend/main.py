@@ -23,7 +23,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-import chromadb
+from pinecone import Pinecone, ServerlessSpec
 from pypdf import PdfReader
 
 from llm_provider import call_llm
@@ -81,14 +81,19 @@ DOCUMENTS: dict = load_registry()
 # Vector DB setup
 # ---------------------------------------------------------------------------
 
-chroma_client = chromadb.PersistentClient(path=str(CHROMA_DIR))
+
 embedding_fn = GeminiEmbeddingFunction()
 
-collection = chroma_client.get_or_create_collection(
-    name="documents",
-    embedding_function=embedding_fn,
-)
-
+pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
+INDEX_NAME = "docmind"
+if INDEX_NAME not in pc.list_indexes().names():
+    pc.create_index(
+        name=INDEX_NAME,
+        dimension=768,          # text-embedding-004 outputs 768-dim vectors
+        metric="cosine",
+        spec=ServerlessSpec(cloud="aws", region="us-east-1")
+    )
+index = pc.Index(INDEX_NAME)
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -179,11 +184,16 @@ async def upload_document(file: UploadFile = File(...)):
         save_path.unlink(missing_ok=True)
         raise HTTPException(status_code=400, detail="Document produced no usable chunks.")
 
-    collection.add(
-        ids=[c["id"] for c in all_chunks],
-        documents=[c["text"] for c in all_chunks],
-        metadatas=[{"page": c["page"], "doc_id": doc_id, "filename": file.filename} for c in all_chunks],
-    )
+    vectors = []
+    texts = [c["text"] for c in all_chunks]
+    embeddings = embedding_fn(texts)          # batch embed all chunks
+    for c, emb in zip(all_chunks, embeddings):
+        vectors.append({
+            "id": c["id"],
+            "values": emb,
+            "metadata": {"page": c["page"], "doc_id": doc_id, "filename": file.filename, "text": c["text"]}
+        })
+    index.upsert(vectors=vectors)
 
     file_type = "pdf" if file.filename.lower().endswith(".pdf") else "txt"
     doc_meta = {
@@ -222,9 +232,11 @@ async def delete_document(doc_id: str):
 
     # Remove from Chroma
     try:
-        results = collection.get(where={"doc_id": doc_id})
-        if results["ids"]:
-            collection.delete(ids=results["ids"])
+        # Replace with:
+        # Pinecone doesn't support filter-based delete on serverless without fetching IDs first
+        # Easiest approach: store chunk IDs in the registry at upload time
+        # Or use a namespace per doc_id instead:
+        index.delete(delete_all=True, namespace=doc_id)
     except Exception:
         pass
 
@@ -245,11 +257,15 @@ async def chat(req: ChatRequest):
     if req.doc_id not in DOCUMENTS:
         raise HTTPException(status_code=404, detail="Document not found. Upload a document first.")
 
-    results = collection.query(
-        query_texts=[req.query],
-        n_results=4,
-        where={"doc_id": req.doc_id},
+    query_embedding = embedding_fn([req.query])[0]
+    results = index.query(
+        vector=query_embedding,
+        top_k=4,
+        filter={"doc_id": req.doc_id},
+        include_metadata=True
     )
+    retrieved_docs = [m["metadata"]["text"] for m in results["matches"]]
+    retrieved_meta = [m["metadata"] for m in results["matches"]]
 
     retrieved_docs = results["documents"][0] if results["documents"] else []
     retrieved_meta = results["metadatas"][0] if results["metadatas"] else []

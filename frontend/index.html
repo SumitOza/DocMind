@@ -1,0 +1,755 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>DocMind — Document AI Assistant</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/3.4.1/tailwind.min.js"></script>
+<style>
+  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; }
+
+  @keyframes pulse-dot {
+    0%, 80%, 100% { opacity: 0.3; transform: scale(0.8); }
+    40% { opacity: 1; transform: scale(1); }
+  }
+  .dot { animation: pulse-dot 1.4s ease-in-out infinite; }
+  .dot:nth-child(2) { animation-delay: 0.16s; }
+  .dot:nth-child(3) { animation-delay: 0.32s; }
+
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  .fade-in { animation: fadeIn 0.25s ease-out forwards; }
+
+  @keyframes shimmer {
+    0% { background-position: -200% 0; }
+    100% { background-position: 200% 0; }
+  }
+  .shimmer {
+    background: linear-gradient(90deg, #f1f5f9 25%, #e2e8f0 50%, #f1f5f9 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+  }
+
+  .drop-zone.drag-over { background-color: #eff6ff; border-color: #3b82f6; }
+
+  ::-webkit-scrollbar { width: 5px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 99px; }
+  ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+  .tab-btn.active {
+    color: #1e293b;
+    border-bottom: 2px solid #1e293b;
+  }
+  .tab-btn {
+    color: #94a3b8;
+    border-bottom: 2px solid transparent;
+  }
+
+  .doc-card:hover .doc-actions { opacity: 1; }
+  .doc-actions { opacity: 0; transition: opacity 0.15s; }
+
+  .prose-answer p { margin-bottom: 0.5em; }
+  .prose-answer p:last-child { margin-bottom: 0; }
+  .prose-answer ul { list-style: disc; padding-left: 1.25em; margin-bottom: 0.5em; }
+  .prose-answer li { margin-bottom: 0.2em; }
+
+  .source-chip-active { background: #dbeafe !important; border-color: #93c5fd !important; }
+</style>
+</head>
+<body class="bg-slate-50 h-screen flex flex-col overflow-hidden">
+
+  <!-- ══════════════════════════════ HEADER ══════════════════════════════ -->
+  <header class="bg-white border-b border-slate-200 px-5 py-3 flex items-center justify-between shrink-0 shadow-sm">
+    <div class="flex items-center gap-3">
+      <div class="w-9 h-9 rounded-xl bg-slate-900 flex items-center justify-center text-white font-bold text-sm tracking-tight select-none">DM</div>
+      <div>
+        <h1 class="font-semibold text-slate-900 text-sm leading-tight">DocMind</h1>
+        <p class="text-xs text-slate-400 leading-tight">Document-grounded AI assistant</p>
+      </div>
+    </div>
+
+    <!-- Active doc badge -->
+    <div id="docBadge" class="hidden items-center gap-2 bg-slate-100 rounded-full px-3 py-1.5 text-xs text-slate-600 max-w-xs truncate">
+      <svg class="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+      </svg>
+      <span id="docBadgeName" class="truncate"></span>
+      <button id="clearDocBtn" title="Close document" class="ml-1 text-slate-400 hover:text-slate-600 transition-colors shrink-0">
+        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12"/>
+        </svg>
+      </button>
+    </div>
+  </header>
+
+  <div class="flex-1 flex overflow-hidden">
+
+    <!-- ══════════════════════════════ SIDEBAR ══════════════════════════════ -->
+    <aside class="w-80 bg-white border-r border-slate-200 flex flex-col shrink-0">
+
+      <!-- Tab bar -->
+      <div class="flex border-b border-slate-200 px-2 pt-1 gap-1">
+        <button class="tab-btn active flex-1 py-2.5 text-xs font-medium transition-colors" data-tab="upload" onclick="switchTab('upload')">
+          Upload
+        </button>
+        <button class="tab-btn flex-1 py-2.5 text-xs font-medium transition-colors relative" data-tab="documents" onclick="switchTab('documents')">
+          Previous Docs
+          <span id="docCountBadge" class="hidden absolute -top-0.5 right-3 bg-blue-500 text-white text-[10px] rounded-full min-w-[16px] h-4 flex items-center justify-center px-1"></span>
+        </button>
+      </div>
+
+      <!-- ── UPLOAD TAB ── -->
+      <div id="tab-upload" class="flex-1 flex flex-col p-4 gap-4 overflow-y-auto">
+        <div>
+          <h2 class="text-sm font-semibold text-slate-800 mb-0.5">Upload a document</h2>
+          <p class="text-xs text-slate-400 mb-3">PDF or plain text — we'll chunk and index it for RAG retrieval.</p>
+
+          <div id="dropZone"
+            class="drop-zone border-2 border-dashed border-slate-200 rounded-2xl p-6 text-center cursor-pointer transition-all hover:border-blue-400 hover:bg-blue-50/40">
+            <div class="w-10 h-10 bg-slate-100 rounded-xl flex items-center justify-center mx-auto mb-3">
+              <svg class="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M12 12v9m0-9l3 3m-3-3l-3 3"/>
+              </svg>
+            </div>
+            <p class="text-sm text-slate-600">Drag & drop, or <span class="text-blue-600 font-medium">browse</span></p>
+            <p class="text-xs text-slate-400 mt-1">.pdf or .txt · max 20 MB</p>
+          </div>
+          <input type="file" id="fileInput" accept=".pdf,.txt" class="hidden" />
+        </div>
+
+        <!-- Upload progress -->
+        <div id="uploadStatus" class="hidden">
+          <div class="bg-blue-50 border border-blue-200 rounded-xl p-3">
+            <div class="flex items-center gap-2.5 mb-2">
+              <div class="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin shrink-0"></div>
+              <span id="uploadStatusText" class="text-xs font-medium text-blue-700">Processing document...</span>
+            </div>
+            <div class="w-full bg-blue-100 rounded-full h-1">
+              <div id="uploadProgressBar" class="bg-blue-500 h-1 rounded-full transition-all duration-500" style="width: 30%"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Upload success -->
+        <div id="docInfo" class="hidden bg-emerald-50 border border-emerald-200 rounded-xl p-3 text-xs text-emerald-800 fade-in">
+          <div class="flex items-center gap-1.5 font-semibold mb-1">
+            <svg class="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/>
+            </svg>
+            Ready to chat
+          </div>
+          <div id="docStats" class="text-emerald-700 leading-relaxed"></div>
+        </div>
+
+        <!-- Tips -->
+        <div class="mt-auto pt-3 border-t border-slate-100">
+          <p class="text-xs text-slate-400 leading-relaxed">
+            Answers are grounded in your document using RAG — every response cites the exact source chunk and page it came from.
+          </p>
+        </div>
+      </div>
+
+      <!-- ── DOCUMENTS TAB ── -->
+      <div id="tab-documents" class="flex-1 flex flex-col hidden overflow-hidden">
+        <div class="p-4 pb-2">
+          <div class="flex items-center justify-between mb-1">
+            <h2 class="text-sm font-semibold text-slate-800">Uploaded documents</h2>
+            <button onclick="loadDocumentsList()" class="text-slate-400 hover:text-slate-600 transition-colors p-1 rounded-lg hover:bg-slate-100" title="Refresh">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+              </svg>
+            </button>
+          </div>
+          <p class="text-xs text-slate-400">Click any document to load it into the chat.</p>
+        </div>
+
+        <!-- Search bar -->
+        <div class="px-4 pb-3">
+          <div class="relative">
+            <svg class="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+            </svg>
+            <input id="docSearch" type="text" placeholder="Search documents..."
+              class="w-full pl-8 pr-3 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-slate-50"
+              oninput="filterDocuments()" />
+          </div>
+        </div>
+
+        <!-- Document list -->
+        <div id="documentsList" class="flex-1 overflow-y-auto px-3 pb-4 space-y-2">
+          <!-- Skeleton loaders -->
+          <div class="shimmer rounded-xl h-16"></div>
+          <div class="shimmer rounded-xl h-16"></div>
+          <div class="shimmer rounded-xl h-16"></div>
+        </div>
+      </div>
+
+    </aside>
+
+    <!-- ══════════════════════════════ CHAT AREA ══════════════════════════════ -->
+    <main class="flex-1 flex flex-col min-w-0">
+
+      <!-- Chat window -->
+      <div id="chatWindow" class="flex-1 overflow-y-auto px-6 py-6 space-y-5">
+        <!-- Empty state -->
+        <div id="emptyState" class="h-full flex flex-col items-center justify-center text-center gap-3">
+          <div class="w-16 h-16 bg-slate-100 rounded-2xl flex items-center justify-center mb-1">
+            <svg class="w-8 h-8 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/>
+            </svg>
+          </div>
+          <div>
+            <p class="text-sm font-medium text-slate-600">No document loaded</p>
+            <p class="text-xs text-slate-400 mt-0.5">Upload a document or select one from Previous Docs</p>
+          </div>
+          <div class="flex gap-2 mt-1">
+            <button onclick="switchTab('upload')" class="text-xs bg-slate-900 text-white px-3 py-1.5 rounded-lg hover:bg-slate-700 transition-colors">
+              Upload document
+            </button>
+            <button onclick="switchTab('documents')" class="text-xs border border-slate-300 text-slate-600 px-3 py-1.5 rounded-lg hover:bg-slate-50 transition-colors">
+              Browse previous
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Chat input -->
+      <div class="border-t border-slate-200 bg-white px-5 py-4">
+        <div class="max-w-3xl mx-auto">
+          <div class="flex gap-2.5 items-end">
+            <div class="flex-1 relative">
+              <textarea
+                id="chatInput"
+                placeholder="Ask something about the document..."
+                rows="1"
+                class="w-full border border-slate-200 rounded-2xl px-4 py-3 pr-12 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-slate-50 disabled:text-slate-400 resize-none overflow-hidden transition-colors"
+                disabled
+                oninput="autoResize(this)"
+                onkeydown="handleInputKey(event)"
+              ></textarea>
+            </div>
+            <button id="sendBtn" disabled onclick="sendMessage()"
+              class="shrink-0 bg-slate-900 text-white rounded-2xl px-5 py-3 text-sm font-medium hover:bg-slate-700 disabled:bg-slate-200 disabled:text-slate-400 disabled:cursor-not-allowed transition-colors flex items-center gap-2">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/>
+              </svg>
+              <span class="hidden sm:inline">Send</span>
+            </button>
+          </div>
+          <p class="text-xs text-slate-400 mt-2 text-center" id="chatHint">Upload or select a document to start chatting</p>
+        </div>
+      </div>
+    </main>
+  </div>
+
+
+<script>
+// ══════════════════════════════════════════════════════════════════════════
+// State
+// ══════════════════════════════════════════════════════════════════════════
+const API_BASE = "";
+let currentDocId = null;
+let currentDocName = null;
+let allDocuments = [];
+
+// ══════════════════════════════════════════════════════════════════════════
+// DOM refs
+// ══════════════════════════════════════════════════════════════════════════
+const dropZone      = document.getElementById('dropZone');
+const fileInput     = document.getElementById('fileInput');
+const uploadStatus  = document.getElementById('uploadStatus');
+const uploadStatusText = document.getElementById('uploadStatusText');
+const uploadProgressBar = document.getElementById('uploadProgressBar');
+const docInfo       = document.getElementById('docInfo');
+const docStats      = document.getElementById('docStats');
+const docBadge      = document.getElementById('docBadge');
+const docBadgeName  = document.getElementById('docBadgeName');
+const clearDocBtn   = document.getElementById('clearDocBtn');
+const chatWindow    = document.getElementById('chatWindow');
+const emptyState    = document.getElementById('emptyState');
+const chatInput     = document.getElementById('chatInput');
+const sendBtn       = document.getElementById('sendBtn');
+const chatHint      = document.getElementById('chatHint');
+const docCountBadge = document.getElementById('docCountBadge');
+const documentsList = document.getElementById('documentsList');
+const docSearch     = document.getElementById('docSearch');
+
+// ══════════════════════════════════════════════════════════════════════════
+// Tabs
+// ══════════════════════════════════════════════════════════════════════════
+function switchTab(tab) {
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.tab === tab);
+  });
+  document.getElementById('tab-upload').classList.toggle('hidden', tab !== 'upload');
+  document.getElementById('tab-documents').classList.toggle('hidden', tab !== 'documents');
+  if (tab === 'documents') loadDocumentsList();
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// Upload
+// ══════════════════════════════════════════════════════════════════════════
+dropZone.addEventListener('click', () => fileInput.click());
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+dropZone.addEventListener('drop', e => {
+  e.preventDefault();
+  dropZone.classList.remove('drag-over');
+  if (e.dataTransfer.files.length) handleUpload(e.dataTransfer.files[0]);
+});
+fileInput.addEventListener('change', () => { if (fileInput.files.length) handleUpload(fileInput.files[0]); });
+
+async function handleUpload(file) {
+  const allowed = ['.pdf', '.txt'];
+  const ext = '.' + file.name.split('.').pop().toLowerCase();
+  if (!allowed.includes(ext)) {
+    showToast('Only .pdf and .txt files are supported.', 'error');
+    return;
+  }
+
+  uploadStatus.classList.remove('hidden');
+  docInfo.classList.add('hidden');
+  uploadStatusText.textContent = 'Extracting & chunking...';
+  uploadProgressBar.style.width = '20%';
+
+  // Simulate progress steps
+  const steps = [
+    { text: 'Extracting text from document...', pct: '35%', delay: 400 },
+    { text: 'Creating semantic chunks...', pct: '55%', delay: 900 },
+    { text: 'Generating embeddings...', pct: '75%', delay: 1400 },
+    { text: 'Indexing in vector store...', pct: '90%', delay: 2000 },
+  ];
+  steps.forEach(({ text, pct, delay }) => {
+    setTimeout(() => {
+      if (!uploadStatus.classList.contains('hidden')) {
+        uploadStatusText.textContent = text;
+        uploadProgressBar.style.width = pct;
+      }
+    }, delay);
+  });
+
+  const formData = new FormData();
+  formData.append('file', file);
+
+  try {
+    const res = await fetch(`${API_BASE}/api/upload`, { method: 'POST', body: formData });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.detail || 'Upload failed');
+    }
+    const data = await res.json();
+
+    uploadProgressBar.style.width = '100%';
+    setTimeout(() => {
+      uploadStatus.classList.add('hidden');
+      docInfo.classList.remove('hidden');
+      docStats.innerHTML = `
+        <div><strong>${data.filename}</strong></div>
+        <div>${data.num_pages} page(s) · ${data.num_chunks} chunks · ${data.file_size}</div>
+      `;
+      activateDocument(data.doc_id, data.filename);
+      showToast('Document indexed — ready to chat!', 'success');
+      // Refresh document count badge
+      updateDocCount();
+    }, 300);
+
+  } catch (e) {
+    uploadStatus.classList.add('hidden');
+    showToast('Upload error: ' + e.message, 'error');
+  } finally {
+    fileInput.value = '';
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// Activate a document for chat
+// ══════════════════════════════════════════════════════════════════════════
+function activateDocument(docId, filename) {
+  currentDocId = docId;
+  currentDocName = filename;
+
+  docBadge.classList.remove('hidden');
+  docBadge.classList.add('flex');
+  docBadgeName.textContent = filename;
+
+  chatInput.disabled = false;
+  sendBtn.disabled = false;
+  chatHint.textContent = `Chatting about: ${filename}`;
+  chatInput.focus();
+
+  // Reset chat window with ready message
+  chatWindow.innerHTML = `
+    <div id="emptyState" class="flex flex-col items-center justify-center text-center gap-2 py-8 fade-in">
+      <div class="w-10 h-10 bg-emerald-50 rounded-xl flex items-center justify-center">
+        <svg class="w-5 h-5 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+        </svg>
+      </div>
+      <p class="text-sm font-medium text-slate-700">Document ready</p>
+      <p class="text-xs text-slate-400">Ask anything about <strong>${escapeHtml(filename)}</strong></p>
+    </div>
+  `;
+}
+
+function deactivateDocument() {
+  currentDocId = null;
+  currentDocName = null;
+
+  docBadge.classList.add('hidden');
+  docBadge.classList.remove('flex');
+
+  chatInput.disabled = true;
+  sendBtn.disabled = true;
+  chatHint.textContent = 'Upload or select a document to start chatting';
+
+  chatWindow.innerHTML = `
+    <div id="emptyState" class="h-full flex flex-col items-center justify-center text-center gap-3">
+      <div class="w-16 h-16 bg-slate-100 rounded-2xl flex items-center justify-center mb-1">
+        <svg class="w-8 h-8 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/>
+        </svg>
+      </div>
+      <div>
+        <p class="text-sm font-medium text-slate-600">No document loaded</p>
+        <p class="text-xs text-slate-400 mt-0.5">Upload a document or select one from Previous Docs</p>
+      </div>
+      <div class="flex gap-2 mt-1">
+        <button onclick="switchTab('upload')" class="text-xs bg-slate-900 text-white px-3 py-1.5 rounded-lg hover:bg-slate-700 transition-colors">Upload document</button>
+        <button onclick="switchTab('documents')" class="text-xs border border-slate-300 text-slate-600 px-3 py-1.5 rounded-lg hover:bg-slate-50 transition-colors">Browse previous</button>
+      </div>
+    </div>
+  `;
+}
+
+clearDocBtn.addEventListener('click', deactivateDocument);
+
+// ══════════════════════════════════════════════════════════════════════════
+// Documents list (Previous Docs tab)
+// ══════════════════════════════════════════════════════════════════════════
+async function loadDocumentsList() {
+  documentsList.innerHTML = `
+    <div class="shimmer rounded-xl h-16"></div>
+    <div class="shimmer rounded-xl h-16"></div>
+    <div class="shimmer rounded-xl h-14"></div>
+  `;
+
+  try {
+    const res = await fetch(`${API_BASE}/api/documents`);
+    if (!res.ok) throw new Error('Failed to load');
+    allDocuments = await res.json();
+    renderDocumentsList(allDocuments);
+    updateDocCount();
+  } catch (e) {
+    documentsList.innerHTML = `
+      <div class="text-center py-8 text-xs text-slate-400">
+        <svg class="w-6 h-6 mx-auto mb-2 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+        </svg>
+        Could not load documents.<br/>
+        <button onclick="loadDocumentsList()" class="text-blue-500 hover:underline mt-1">Retry</button>
+      </div>
+    `;
+  }
+}
+
+function renderDocumentsList(docs) {
+  if (docs.length === 0) {
+    documentsList.innerHTML = `
+      <div class="text-center py-10 text-xs text-slate-400">
+        <svg class="w-8 h-8 mx-auto mb-2 text-slate-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+        </svg>
+        No documents uploaded yet.<br/>
+        <button onclick="switchTab('upload')" class="text-blue-500 hover:underline mt-1">Upload your first document</button>
+      </div>
+    `;
+    return;
+  }
+
+  documentsList.innerHTML = docs.map(doc => {
+    const isActive = doc.doc_id === currentDocId;
+    const icon = doc.file_type === 'pdf'
+      ? `<svg class="w-4 h-4 text-red-500" fill="currentColor" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6zm-1 1.5L18.5 9H13V3.5zM8 13h8v1H8v-1zm0 3h5v1H8v-1zm0-6h2v1H8v-1z"/></svg>`
+      : `<svg class="w-4 h-4 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>`;
+    const uploadedDate = doc.uploaded_at ? formatDate(doc.uploaded_at) : '';
+
+    return `
+      <div class="doc-card group rounded-xl border transition-all cursor-pointer select-none
+        ${isActive ? 'border-blue-300 bg-blue-50' : 'border-slate-200 bg-white hover:border-blue-200 hover:bg-slate-50'}"
+        onclick="selectDocument('${doc.doc_id}', '${escapeHtml(doc.filename)}')">
+        <div class="flex items-start gap-2.5 p-3">
+          <div class="mt-0.5 shrink-0">${icon}</div>
+          <div class="flex-1 min-w-0">
+            <p class="text-xs font-medium text-slate-800 truncate" title="${escapeHtml(doc.filename)}">${escapeHtml(doc.filename)}</p>
+            <p class="text-[11px] text-slate-400 mt-0.5">${doc.num_pages} pages · ${doc.num_chunks} chunks · ${doc.file_size || ''}</p>
+            ${uploadedDate ? `<p class="text-[10px] text-slate-300 mt-0.5">${uploadedDate}</p>` : ''}
+          </div>
+          <div class="doc-actions flex items-center gap-1 shrink-0" onclick="event.stopPropagation()">
+            ${isActive ? `<span class="text-[10px] text-blue-600 font-medium bg-blue-100 rounded-full px-2 py-0.5">Active</span>` : ''}
+            <button onclick="confirmDeleteDoc('${doc.doc_id}', '${escapeHtml(doc.filename)}')"
+              class="p-1 rounded-lg text-slate-300 hover:text-red-500 hover:bg-red-50 transition-colors"
+              title="Delete document">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+function filterDocuments() {
+  const q = docSearch.value.toLowerCase();
+  const filtered = allDocuments.filter(d => d.filename.toLowerCase().includes(q));
+  renderDocumentsList(filtered);
+}
+
+function selectDocument(docId, filename) {
+  activateDocument(docId, filename);
+  // Re-render to update active state
+  renderDocumentsList(allDocuments);
+  // Switch to chat (just show the badge feedback)
+  showToast(`Loaded: ${filename}`, 'success');
+}
+
+async function confirmDeleteDoc(docId, filename) {
+  if (!confirm(`Delete "${filename}"?\n\nThis will remove it from the index permanently.`)) return;
+
+  try {
+    const res = await fetch(`${API_BASE}/api/documents/${docId}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error('Delete failed');
+
+    if (currentDocId === docId) deactivateDocument();
+    allDocuments = allDocuments.filter(d => d.doc_id !== docId);
+    renderDocumentsList(allDocuments);
+    updateDocCount();
+    showToast('Document deleted.', 'info');
+  } catch (e) {
+    showToast('Could not delete document: ' + e.message, 'error');
+  }
+}
+
+async function updateDocCount() {
+  try {
+    const res = await fetch(`${API_BASE}/api/documents`);
+    if (!res.ok) return;
+    const docs = await res.json();
+    const count = docs.length;
+    docCountBadge.textContent = count;
+    docCountBadge.classList.toggle('hidden', count === 0);
+    docCountBadge.classList.toggle('flex', count > 0);
+  } catch {}
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// Chat
+// ══════════════════════════════════════════════════════════════════════════
+function handleInputKey(e) {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    sendMessage();
+  }
+}
+
+function autoResize(el) {
+  el.style.height = 'auto';
+  el.style.height = Math.min(el.scrollHeight, 120) + 'px';
+}
+
+function clearEmptyState() {
+  const es = document.getElementById('emptyState');
+  if (es) es.remove();
+}
+
+function addUserBubble(text) {
+  clearEmptyState();
+  const div = document.createElement('div');
+  div.className = 'flex justify-end fade-in';
+  div.innerHTML = `
+    <div class="bg-slate-900 text-white rounded-2xl rounded-tr-sm px-4 py-2.5 max-w-lg text-sm leading-relaxed shadow-sm">
+      ${escapeHtml(text)}
+    </div>
+  `;
+  chatWindow.appendChild(div);
+  scrollToBottom();
+}
+
+function addLoadingBubble() {
+  const div = document.createElement('div');
+  div.id = 'loadingBubble';
+  div.className = 'flex justify-start fade-in';
+  div.innerHTML = `
+    <div class="bg-white border border-slate-200 rounded-2xl rounded-tl-sm px-4 py-3 flex gap-1 shadow-sm">
+      <span class="dot w-1.5 h-1.5 bg-slate-300 rounded-full inline-block"></span>
+      <span class="dot w-1.5 h-1.5 bg-slate-300 rounded-full inline-block"></span>
+      <span class="dot w-1.5 h-1.5 bg-slate-300 rounded-full inline-block"></span>
+    </div>
+  `;
+  chatWindow.appendChild(div);
+  scrollToBottom();
+}
+
+function removeLoadingBubble() {
+  const el = document.getElementById('loadingBubble');
+  if (el) el.remove();
+}
+
+function addAssistantBubble(answer, sources) {
+  const wrapper = document.createElement('div');
+  wrapper.className = 'flex justify-start fade-in';
+
+  const sourcesHtml = sources.length
+    ? `<div class="flex flex-wrap gap-1.5 pt-2 border-t border-slate-100 mt-2">
+        <span class="text-[10px] text-slate-400 w-full mb-0.5">Sources</span>
+        ${sources.map(s => `
+          <button class="source-chip text-xs bg-slate-100 text-slate-600 border border-slate-200 rounded-full px-2.5 py-1 hover:bg-blue-50 hover:text-blue-700 hover:border-blue-200 transition-colors"
+            data-snippet="${escapeHtml(s.snippet)}" data-page="${s.page}">
+            📄 Page ${s.page}
+          </button>
+        `).join('')}
+      </div>`
+    : '';
+
+  wrapper.innerHTML = `
+    <div class="bg-white border border-slate-200 rounded-2xl rounded-tl-sm px-4 py-3 max-w-2xl text-sm shadow-sm">
+      <div class="prose-answer text-slate-800 leading-relaxed answer-text"></div>
+      ${sourcesHtml}
+      <div class="source-preview hidden mt-2 bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs text-slate-600 leading-relaxed"></div>
+    </div>
+  `;
+
+  chatWindow.appendChild(wrapper);
+
+  // Typewriter
+  const answerEl = wrapper.querySelector('.answer-text');
+  typeWriter(answerEl, answer);
+
+  // Source chips
+  wrapper.querySelectorAll('.source-chip').forEach(chip => {
+    chip.addEventListener('click', () => {
+      const preview = wrapper.querySelector('.source-preview');
+      const isOpen = chip.classList.contains('source-chip-active');
+      wrapper.querySelectorAll('.source-chip').forEach(c => c.classList.remove('source-chip-active'));
+      if (isOpen) {
+        preview.classList.add('hidden');
+      } else {
+        chip.classList.add('source-chip-active');
+        preview.innerHTML = `<span class="font-medium text-slate-500 text-[10px] uppercase tracking-wide">Page ${chip.dataset.page}</span><br/>"${escapeHtml(chip.dataset.snippet)}"`;
+        preview.classList.remove('hidden');
+      }
+    });
+  });
+
+  scrollToBottom();
+}
+
+function typeWriter(el, text, speed = 10) {
+  let i = 0;
+  // Convert simple markdown-ish patterns
+  const formatted = text
+    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*(.*?)\*/g, '<em>$1</em>')
+    .replace(/\n\n/g, '<br/><br/>')
+    .replace(/\n/g, '<br/>');
+
+  function step() {
+    if (i < formatted.length) {
+      el.innerHTML = formatted.substring(0, i + 1);
+      i++;
+      scrollToBottom();
+      setTimeout(step, speed);
+    }
+  }
+  step();
+}
+
+async function sendMessage() {
+  const query = chatInput.value.trim();
+  if (!query || !currentDocId) return;
+
+  addUserBubble(query);
+  chatInput.value = '';
+  chatInput.style.height = 'auto';
+  chatInput.disabled = true;
+  sendBtn.disabled = true;
+  addLoadingBubble();
+
+  try {
+    const res = await fetch(`${API_BASE}/api/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ doc_id: currentDocId, query }),
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.detail || 'Request failed');
+    }
+    const data = await res.json();
+    removeLoadingBubble();
+    addAssistantBubble(data.answer, data.sources || []);
+  } catch (e) {
+    removeLoadingBubble();
+    addAssistantBubble('⚠️ Something went wrong: ' + e.message, []);
+  } finally {
+    chatInput.disabled = false;
+    sendBtn.disabled = false;
+    chatInput.focus();
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// Toast notifications
+// ══════════════════════════════════════════════════════════════════════════
+function showToast(message, type = 'info') {
+  const colors = {
+    success: 'bg-emerald-600',
+    error: 'bg-red-600',
+    info: 'bg-slate-700',
+  };
+  const toast = document.createElement('div');
+  toast.className = `fixed bottom-6 left-1/2 -translate-x-1/2 ${colors[type]} text-white text-xs px-4 py-2.5 rounded-xl shadow-lg z-50 fade-in`;
+  toast.textContent = message;
+  document.body.appendChild(toast);
+  setTimeout(() => toast.remove(), 3000);
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// Utilities
+// ══════════════════════════════════════════════════════════════════════════
+function scrollToBottom() {
+  chatWindow.scrollTop = chatWindow.scrollHeight;
+}
+
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+function formatDate(iso) {
+  const d = new Date(iso + 'Z');
+  if (isNaN(d.getTime())) return iso;
+  const now = new Date();
+  const diffMs = now - d;
+  const diffMins = Math.floor(diffMs / 60000);
+  const diffHours = Math.floor(diffMs / 3600000);
+  const diffDays = Math.floor(diffMs / 86400000);
+  if (diffMins < 2) return 'just now';
+  if (diffMins < 60) return `${diffMins}m ago`;
+  if (diffHours < 24) return `${diffHours}h ago`;
+  if (diffDays < 7) return `${diffDays}d ago`;
+  return d.toLocaleDateString();
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// Init
+// ══════════════════════════════════════════════════════════════════════════
+updateDocCount();
+</script>
+</body>
+</html>

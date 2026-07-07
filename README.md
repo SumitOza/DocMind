@@ -1,4 +1,5 @@
 ---
+<<<<<<< HEAD
 title: DocMind — Document AI Assistant
 emoji: 📄
 colorFrom: slate
@@ -82,3 +83,14 @@ Edit `.env` (local) or Space Secrets (HuggingFace):
 ```
 LLM_PROVIDER=gemini   # or "groq" / "cerebras"
 ```
+=======
+title: DocMind
+emoji: 🌍
+colorFrom: pink
+colorTo: blue
+sdk: docker
+pinned: false
+---
+
+Check out the configuration reference at https://huggingface.co/docs/hub/spaces-config-reference
+>>>>>>> 0e32f1524ced368976e3831c03f7017010ebc1b7

@@ -89,7 +89,7 @@ INDEX_NAME = "docmind"
 if INDEX_NAME not in pc.list_indexes().names():
     pc.create_index(
         name=INDEX_NAME,
-        dimension=768,          # text-embedding-004 outputs 768-dim vectors
+        dimension=3072,        # text-embedding-004 outputs 768-dim vectors
         metric="cosine",
         spec=ServerlessSpec(cloud="aws", region="us-east-1")
     )

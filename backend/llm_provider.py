@@ -58,7 +58,7 @@ def _call_cerebras(system_prompt: str, user_prompt: str) -> str:
 
     client = Cerebras(api_key=os.getenv("CEREBRAS_API_KEY"))
     response = client.chat.completions.create(
-        model="llama-3.3-70b",
+        model="gamma4-31b",
         messages=[
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
